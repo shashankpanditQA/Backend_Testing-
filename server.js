@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS transactions(id INTEGER PRIMARY KEY AUTOINCREMENT,use
 
 const app = express();
 app.use(express.json());
+app.get('/health', (q, res) => res.send('ok'));
 app.use(express.static(path.join(__dirname, 'public')));
 const err = (res, code, msg, details) => res.status(code).json({ error: msg, ...(details && { details }) });
 const now = () => new Date().toISOString();
@@ -201,4 +202,4 @@ app.get('/postman.json', (q, res) => res.json({
     ...(p === '/auth/login' && { event: [{ listen: 'test', script: { exec: ['pm.collectionVariables.set("token", pm.response.json().token)'] } }] }) }; }) }));
 
 app.use((e, req, res, next) => e.type === 'entity.parse.failed' ? err(res, 400, 'Invalid JSON body') : (console.error(e), err(res, 500, 'Internal server error')));
-app.listen(PORT, () => console.log(`App: http://localhost:${PORT}  Swagger: /api-docs  Postman: /postman.json`));
+app.listen(PORT, '0.0.0.0', () => console.log(`App: http://localhost:${PORT}  Swagger: /api-docs  Postman: /postman.json`));
