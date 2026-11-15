@@ -7,7 +7,7 @@
   <span class="navbar-brand">🏦 Bank</span>
   <a class="nav-link text-white" id="nav-dashboard" href="#/dashboard">Dashboard</a>
   <a class="nav-link text-white" id="nav-accounts" href="#/accounts">Accounts</a>
-  <a class="nav-link text-white" id="nav-transactions" href="#/transactions">Transactions</a>
+  <a class="nav-link text-white" id="nav-transactions" href="#/transactions">Account History</a>
   <a class="nav-link text-white" id="nav-explorer" href="#/explorer">API Explorer</a>
   <a class="nav-link text-white" id="nav-swagger" href="/api-docs" target="_blank">Swagger</a>
   <span class="ms-auto text-white-50" id="who"></span>
@@ -58,24 +58,16 @@ pages.dashboard = async () => {
 };
 
 // ---------- Accounts ----------
+// flat view-model of the nested account response, used by the tables and forms
+const fa = a => ({ ...a, id: a.accountId, accountHolderName: a.customer.name, email: a.customer.email, panNumber: a.customer.panNumber, mobileNumber: a.customer.mobileNumber,
+  aadhaarNumber: a.customer.aadhaarNumber, branchCode: a.branch.code, ifscCode: a.branch.ifscCode, branchName: a.branch.name });
 const AQ = { page: 1, limit: 5, sortBy: 'id', order: 'asc', search: '', status: '', accountType: '' };
-const SEC = { contacts: ['type:Mobile|Email|Phone', 'value', 'primary:bool'], addresses: ['type:Permanent|Current|Office', 'city', 'state'],
-  kycDocuments: ['type:PAN|AADHAAR|Passport', 'number', 'verified:bool'], nominees: ['name', 'relation', 'percentage:num'] };
-const row = (s, o = {}) => `<div class="row g-1 mb-1 r">${SEC[s].map(f => { const [k, t = ''] = f.split(':'), v = o[k]; let i;
-  if (t.includes('|')) i = `<select class="form-select" data-k="${k}">${t.split('|').map(x => `<option ${x == v ? 'selected' : ''}>${x}</option>`).join('')}</select>`;
-  else if (t == 'bool') i = `<input type="checkbox" class="form-check-input" data-k="${k}" ${v ? 'checked' : ''}> ${k}`;
-  else i = `<input type="${t == 'num' ? 'number' : 'text'}" class="form-control" placeholder="${k}" data-k="${k}" value="${esc(v)}">`;
-  return `<div class="col">${i}</div>`; }).join('')}<div class="col-1"><button type="button" class="btn btn-sm btn-outline-danger rm">×</button></div></div>`;
-const secBox = (s, items) => `<h6 class="mt-3">${s} <button type="button" class="btn btn-sm btn-outline-primary add" id="add-${s}" data-sec="${s}">+ Add</button></h6><div id="sec-${s}">${(items || []).map(o => row(s, o)).join('')}</div>`;
-const coll = s => [...document.querySelectorAll(`#sec-${s} .r`)].map(r => Object.fromEntries([...r.querySelectorAll('[data-k]')]
-  .map(i => [i.dataset.k, i.type == 'checkbox' ? i.checked : i.type == 'number' ? Number(i.value) : i.value])));
-const accForm = (a = {}) => `<form id="accForm" class="card card-body mb-3" onsubmit="return false"><h5>${a.id ? 'Edit' : 'Add'} Account</h5><div id="formMsg"></div><div class="row g-2">
+const accForm = (a = {}) => `<form id="accForm" class="card card-body mb-3" onsubmit="return false"><h5>${a.id ? 'Edit' : 'Open'} Account</h5><div id="formMsg"></div><div class="row g-2">
   <div class="col-md-4"><label class="form-label">Account Type</label>${sel('accountType', ['Savings', 'Current', 'Salary'], a.accountType)}</div>
-  ${inp('accountNumber', 'Account Number', a.accountNumber)}${inp('accountHolderName', 'Holder Name', a.accountHolderName)}${inp('email', 'Email', a.email)}
-  ${inp('mobileNumber', 'Mobile', a.mobileNumber)}${inp('panNumber', 'PAN', a.panNumber)}${inp('aadhaarNumber', 'Aadhaar', a.aadhaarNumber)}${inp('balance', 'Balance', a.balance ?? 0, 'number')}
-  <div class="col-md-4"><label class="form-label">Status</label>${sel('status', ['Active', 'Inactive', 'Closed'], a.status)}</div></div>
-  ${secBox('contacts', (a.customer || {}).contacts)}${secBox('addresses', (a.customer || {}).addresses)}${secBox('kycDocuments', a.kycDocuments)}${secBox('nominees', a.nominees)}
-  <div class="mt-3"><button id="saveAcc" class="btn btn-primary">Save</button> <button type="button" id="cancelAcc" class="btn btn-secondary">Cancel</button></div></form>`;
+  ${inp('username', 'Username', a.accountHolderName)}
+  <div class="col-md-4"><label class="form-label">Customer ID</label><input id="customerId" class="form-control" value="${esc(localStorage.userId)}" readonly></div>
+  ${inp('email', 'Email', a.email)}${inp('panNumber', 'PAN Number', a.panNumber)}</div>
+  <div class="mt-3"><button id="saveAcc" class="btn btn-primary">${a.id ? 'Save' : 'Create Account'}</button> <button type="button" id="cancelAcc" class="btn btn-secondary">Cancel</button></div></form>`;
 
 pages.accounts = async () => {
   $('#app').innerHTML = `<div class="d-flex justify-content-between mb-2"><h3>Accounts</h3><button id="addBtn" class="btn btn-success">Add Account</button></div>
@@ -84,27 +76,26 @@ pages.accounts = async () => {
   <div class="col-auto"><button id="searchBtn" class="btn btn-primary">Search</button></div></div><div id="formBox"></div><div id="tbl"></div>`;
   let cache = [];
   const load = async () => {
-    const { j } = await api('GET', '/accounts?' + new URLSearchParams(Object.entries(AQ).filter(([, v]) => v !== ''))); cache = j.data;
+    const { j } = await api('GET', '/accounts?' + new URLSearchParams(Object.entries(AQ).filter(([, v]) => v !== ''))); j.data = j.data.map(fa); cache = j.data;
     $('#tbl').innerHTML = !j.data.length ? '<div id="noRecords" class="alert alert-info">No Records Found</div>' :
       `<table class="table table-striped" id="accTable"><thead><tr>${[['id', 'ID'], ['accountNumber', 'Account No'], ['accountHolderName', 'Holder'], ['accountType', 'Type'], ['balance', 'Balance'], ['status', 'Status']]
-        .map(([k, l]) => `<th role="button" data-sort="${k}">${l}${AQ.sortBy == k ? (AQ.order == 'asc' ? ' ▲' : ' ▼') : ''}</th>`).join('')}<th>Actions</th></tr></thead><tbody>
-      ${j.data.map(a => `<tr data-testid="row-${esc(a.accountNumber)}"><td>${a.id}</td><td>${esc(a.accountNumber)}</td><td>${esc(a.accountHolderName)}</td><td>${a.accountType}</td><td>${a.balance}</td><td>${a.status}</td>
+        .map(([k, l]) => `<th role="button" data-sort="${k}">${l}${AQ.sortBy == k ? (AQ.order == 'asc' ? ' ▲' : ' ▼') : ''}</th>`).join('')}<th>IFSC</th><th>KYC</th><th>Actions</th></tr></thead><tbody>
+      ${j.data.map(a => `<tr data-testid="row-${esc(a.accountNumber)}"><td>${a.id}</td><td>${esc(a.accountNumber)}</td><td>${esc(a.accountHolderName)}</td><td>${a.accountType}</td><td>${a.balance}</td><td>${a.status}</td><td>${a.ifscCode}</td><td>${a.kycStatus}</td>
       <td><a class="btn btn-sm btn-info" href="#/account/${a.id}">View</a> <button class="btn btn-sm btn-warning edit" data-id="${a.id}">Edit</button> <button class="btn btn-sm btn-danger del" data-id="${a.id}">Delete</button></td></tr>`).join('')}</tbody></table>` + pager(j);
     if ($('#prev')) { $('#prev').onclick = () => { AQ.page--; load(); }; $('#next').onclick = () => { AQ.page++; load(); }; }
   };
   const openForm = a => {
-    $('#formBox').innerHTML = accForm(a); const f = $('#accForm');
-    f.onclick = e => { const t = e.target;
-      if (t.classList.contains('add')) $('#sec-' + t.dataset.sec).insertAdjacentHTML('beforeend', row(t.dataset.sec));
-      if (t.classList.contains('rm')) t.closest('.r').remove();
-      if (t.id == 'cancelAcc') $('#formBox').innerHTML = ''; };
+    $('#formBox').innerHTML = accForm(a);
+    $('#accForm').onclick = e => { if (e.target.id == 'cancelAcc') $('#formBox').innerHTML = ''; };
     $('#saveAcc').onclick = async () => {
-      const v = i => $('#' + i).value, b = { accountType: v('accountType'), accountNumber: v('accountNumber'), accountHolderName: v('accountHolderName'), email: v('email'),
-        mobileNumber: v('mobileNumber'), panNumber: v('panNumber'), aadhaarNumber: v('aadhaarNumber'), balance: Number(v('balance')) || 0, status: v('status'),
-        customer: { name: v('accountHolderName'), contacts: coll('contacts'), addresses: coll('addresses') }, kycDocuments: coll('kycDocuments'), nominees: coll('nominees') };
-      const { s, j } = await api(a ? 'PUT' : 'POST', a ? '/accounts/' + a.id : '/accounts', b);
+      const v = i => $('#' + i).value, b = { accountType: v('accountType'), username: v('username'), customerId: Number(v('customerId')), email: v('email'), panNumber: v('panNumber') };
+      const { s, j: raw } = await api(a ? 'PATCH' : 'POST', a ? '/accounts/' + a.id : '/accounts', b), j = s < 400 ? fa(raw) : raw;
       if (s >= 400) return $('#formMsg').innerHTML = msg(j);
-      $('#formBox').innerHTML = msg(a ? 'Account updated' : 'Account created', 'success'); load();
+      $('#formBox').innerHTML = a ? msg('Account updated', 'success') : `<div class="alert alert-success" id="newAccount" data-testid="msg"><b>Account created.</b>
+        Account Number: <span id="newAccountNumber">${j.accountNumber}</span> | Branch Code: <span id="newBranchCode">${j.branchCode}</span> |
+        IFSC: <span id="newIfsc">${j.ifscCode}</span> | Branch: <span id="newBranchName">${esc(j.branchName)}</span>
+        <a class="btn btn-sm btn-dark ms-2" id="goKyc" href="#/account/${j.id}">Upload KYC</a></div>`;
+      load();
     };
   };
   $('#addBtn').onclick = () => openForm();
@@ -117,41 +108,49 @@ pages.accounts = async () => {
   load();
 };
 
-// ---------- Account details ----------
+// ---------- Account details + KYC upload ----------
 pages.account = async id => {
-  const { s, j: a } = await api('GET', '/accounts/' + id);
-  if (s != 200) return $('#app').innerHTML = msg(a);
-  const c = a.customer, tb = (t, id, cols, rows) => `<h5 class="mt-3">${t}</h5><table class="table table-sm" id="${id}"><thead><tr>${cols.map(x => `<th>${x}</th>`).join('')}</tr></thead>
+  const { s, j: raw } = await api('GET', '/accounts/' + id);
+  if (s != 200) return $('#app').innerHTML = msg(raw);
+  const a = fa(raw);
+  const c = a.customer, tb = (t, tid, cols, rows) => `<h5 class="mt-3">${t}</h5><table class="table table-sm" id="${tid}"><thead><tr>${cols.map(x => `<th>${x}</th>`).join('')}</tr></thead>
     <tbody>${(rows || []).map(r => `<tr>${cols.map(x => `<td>${esc(r[x])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-  $('#app').innerHTML = `<a href="#/accounts">&larr; Back</a><h3 class="mt-2">Account ${esc(a.accountNumber)}</h3><div class="card card-body"><div class="row">
-  ${[['type', 'Type', a.accountType], ['holder', 'Holder', c.name], ['email', 'Email', a.email], ['mobile', 'Mobile', a.mobileNumber], ['pan', 'PAN', a.panNumber],
-    ['aadhaar', 'Aadhaar', a.aadhaarNumber], ['balance', 'Balance', a.balance], ['status', 'Status', a.status]].map(([i, l, v]) => `<div class="col-md-3"><b>${l}</b><div id="d-${i}">${esc(v)}</div></div>`).join('')}</div></div>
-  ${tb('Contacts', 'tblContacts', ['type', 'value', 'primary'], c.contacts)}${tb('Addresses', 'tblAddresses', ['type', 'city', 'state'], c.addresses)}
-  ${tb('KYC Documents', 'tblKyc', ['type', 'number', 'verified'], a.kycDocuments)}${tb('Nominees', 'tblNominees', ['name', 'relation', 'percentage'], a.nominees)}`;
+  $('#app').innerHTML = `<a href="#/accounts">&larr; Back</a><h3 class="mt-2">Account <span id="d-number">${esc(a.accountNumber)}</span></h3><div class="card card-body"><div class="row g-2">
+  ${[['type', 'Type', a.accountType], ['holder', 'Username', c.name], ['customerId', 'Customer ID', a.customerId], ['email', 'Email', a.email], ['pan', 'PAN', a.panNumber], ['branchCode', 'Branch Code', a.branchCode],
+    ['ifsc', 'IFSC', a.ifscCode], ['branch', 'Branch', a.branchName], ['balance', 'Balance', a.balance], ['status', 'Status', a.status], ['kyc', 'KYC Status', a.kycStatus],
+    ['mobile', 'Mobile', a.mobileNumber], ['aadhaar', 'Aadhaar', a.aadhaarNumber]].filter(x => x[2] !== null && x[2] !== undefined && x[2] !== '')
+    .map(([i, l, v]) => `<div class="col-md-3"><b>${l}</b><div id="d-${i}">${esc(v)}</div></div>`).join('')}</div></div>
+  <div class="card card-body mt-3"><h5>Upload KYC Document</h5><div id="kycMsg"></div><div class="row g-2 align-items-end">
+    <div class="col-md-3"><label class="form-label">Document Type</label>${sel('kycType', ['PAN', 'AADHAAR', 'Passport', 'DrivingLicense', 'VoterId'])}</div>
+    ${inp('kycNumber', 'Document Number (optional)', '').replace('col-md-4', 'col-md-3')}
+    <div class="col-md-4"><label class="form-label">File (pdf / png / jpg, max 2MB)</label><input id="kycFile" type="file" class="form-control" accept=".pdf,.png,.jpg,.jpeg"></div>
+    <div class="col-auto"><button id="uploadKyc" class="btn btn-primary">Upload</button></div></div></div>
+  ${tb('KYC Documents', 'tblKyc', ['type', 'number', 'fileName', 'verified', 'uploadedAt'], a.kycDocuments)}${tb('Contacts', 'tblContacts', ['type', 'value', 'primary'], c.contacts)}
+  ${tb('Addresses', 'tblAddresses', ['type', 'city', 'state'], c.addresses)}${tb('Nominees', 'tblNominees', ['name', 'relation', 'percentage'], a.nominees)}`;
+  $('#uploadKyc').onclick = async () => {
+    const fd = new FormData(), f = $('#kycFile').files[0];
+    fd.append('documentType', $('#kycType').value); fd.append('documentNumber', $('#kycNumber').value); if (f) fd.append('document', f);
+    const r = await fetch(`/accounts/${id}/kyc`, { method: 'POST', headers: { Authorization: 'Bearer ' + T() }, body: fd }), j = await r.json();
+    if (!r.ok) return $('#kycMsg').innerHTML = msg(j);
+    await pages.account(id);
+    $('#kycMsg').innerHTML = `<div class="alert alert-success" id="kycSuccess" data-testid="msg">${esc(j.message)} (verified: <span id="kycVerified">${j.verified}</span>)</div>`;
+  };
 };
 
-// ---------- Transactions ----------
-const TQ = { page: 1, limit: 10, sortBy: 'id', order: 'desc' };
+// ---------- Account history (read-only transactions) ----------
+const TQ = { page: 1, limit: 10, sortBy: 'id', order: 'desc', accountId: '' };
 pages.transactions = async () => {
-  const acc = (await api('GET', '/accounts?limit=100')).j.data || [];
-  $('#app').innerHTML = `<h3>Transactions</h3><div id="tm"></div><div class="card card-body mb-3"><div class="row g-2">
-  <div class="col-md-3"><label class="form-label">Account</label><select id="tAccount" class="form-select">${acc.map(a => `<option value="${a.id}">${a.id} - ${esc(a.accountNumber)}</option>`).join('')}</select></div>
-  <div class="col-md-2"><label class="form-label">Type</label>${sel('tType', ['DEPOSIT', 'WITHDRAWAL'])}</div>
-  ${inp('tAmount', 'Amount', '', 'number').replace('col-md-4', 'col-md-2')}${inp('tDesc', 'Description', '').replace('col-md-4', 'col-md-3')}${inp('tKey', 'Idempotency-Key (optional)', '').replace('col-md-4', 'col-md-2')}
-  </div><div class="mt-2"><button id="createTxn" class="btn btn-primary">Create Transaction</button></div></div><div id="ttbl"></div>`;
+  const acc = ((await api('GET', '/accounts?limit=100')).j.data || []).map(fa);
+  $('#app').innerHTML = `<h3>Account History</h3><div class="row g-2 mb-3"><div class="col-md-4"><label class="form-label">Account</label>
+  <select id="accFilter" class="form-select"><option value="">All accounts</option>${acc.map(a => `<option value="${a.id}" ${a.id == TQ.accountId ? 'selected' : ''}>${esc(a.accountNumber)} - ${esc(a.accountHolderName)}</option>`).join('')}</select></div></div><div id="ttbl"></div>`;
   const load = async () => {
-    const { j } = await api('GET', '/transactions?' + new URLSearchParams(TQ));
-    $('#ttbl').innerHTML = !j.data.length ? '<div id="noRecords" class="alert alert-info">No Records Found</div>' :
-      `<table class="table table-striped" id="txnTable"><thead><tr><th>Transaction ID</th><th>Account</th><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody>
-      ${j.data.map(t => `<tr data-testid="txn-${t.id}"><td>${t.id}</td><td>${t.accountId}</td><td>${t.transactionType}</td><td>${t.amount}</td><td>${t.status}</td><td>${new Date(t.createdAt).toLocaleString()}</td></tr>`).join('')}</tbody></table>` + pager(j);
+    const { j } = await api('GET', '/transactions?' + new URLSearchParams(Object.entries(TQ).filter(([, v]) => v !== '')));
+    $('#ttbl').innerHTML = !j.data.length ? '<div id="noRecords" class="alert alert-info">No Records Found</div><small class="text-muted">Transactions are created through the API (POST /transactions).</small>' :
+      `<table class="table table-striped" id="txnTable"><thead><tr><th>Transaction ID</th><th>Account</th><th>Type</th><th>Amount</th><th>Balance After</th><th>Status</th><th>Date</th><th>Description</th></tr></thead><tbody>
+      ${j.data.map(t => `<tr data-testid="txn-${t.id}"><td>${t.id}</td><td>${t.accountId}</td><td>${t.transactionType}</td><td>${t.amount}</td><td>${t.balanceAfter}</td><td>${t.status}</td><td>${new Date(t.createdAt).toLocaleString()}</td><td>${esc(t.description)}</td></tr>`).join('')}</tbody></table>` + pager(j);
     if ($('#prev')) { $('#prev').onclick = () => { TQ.page--; load(); }; $('#next').onclick = () => { TQ.page++; load(); }; }
   };
-  $('#createTxn').onclick = async () => {
-    const key = $('#tKey').value, r = await fetch('/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + T(), ...(key ? { 'Idempotency-Key': key } : {}) },
-      body: JSON.stringify({ accountId: +$('#tAccount').value, transactionType: $('#tType').value, amount: Number($('#tAmount').value), description: $('#tDesc').value }) });
-    const j = await r.json();
-    $('#tm').innerHTML = msg(r.ok ? (r.status == 200 ? `Replay: existing transaction #${j.id} returned` : `Transaction #${j.id} created`) : j, r.ok ? 'success' : 'danger'); load();
-  };
+  $('#accFilter').onchange = () => { TQ.accountId = $('#accFilter').value; TQ.page = 1; load(); };
   load();
 };
 
@@ -161,15 +160,18 @@ pages.explorer = () => {
   <div class="col"><input id="url" class="form-control" value="/accounts" placeholder="/path?query"></div><div class="col-auto"><button id="run" class="btn btn-primary">Execute</button></div></div>
   <label class="form-label">Headers (JSON) <button id="addJwt" class="btn btn-sm btn-outline-secondary">Add JWT Token</button></label>
   <textarea id="hdrs" class="form-control mb-2" rows="3">{"Content-Type":"application/json"}</textarea>
-  <label class="form-label">Body (raw)</label><textarea id="body" class="form-control mb-3" rows="8"></textarea>
+  <label class="form-label">Body (raw JSON; or key=value lines when a file is attached)</label><textarea id="body" class="form-control mb-2" rows="8"></textarea>
+  <label class="form-label">Attach file (sent as multipart field "document")</label><input id="file" type="file" class="form-control mb-3">
   <div class="row"><div class="col-md-6"><b>Request URL</b><pre id="reqUrl" class="border p-2"></pre><b>Request Headers</b><pre id="reqHeaders" class="border p-2"></pre><b>Request Body</b><pre id="reqBody" class="border p-2"></pre></div>
   <div class="col-md-6"><b>Status Code</b> <span id="resStatus" class="badge bg-secondary"></span> <b>Time</b> <span id="resTime"></span><br><b>Response Body</b><pre id="resBody" class="border p-2" style="max-height:420px;overflow:auto"></pre></div></div>`;
   $('#addJwt').onclick = () => { let h = {}; try { h = JSON.parse($('#hdrs').value || '{}'); } catch {} h.Authorization = 'Bearer ' + (T() || ''); $('#hdrs').value = JSON.stringify(h, null, 1); };
   $('#run').onclick = async () => {
     let h; try { h = JSON.parse($('#hdrs').value || '{}'); } catch { return alert('Headers must be valid JSON'); }
     const m = $('#method').value, u = $('#url').value, b = $('#body').value, o = { method: m, headers: h }, t0 = performance.now();
-    if (b.trim() && !['GET', 'DELETE'].includes(m)) o.body = b;
-    $('#reqUrl').textContent = m + ' ' + location.origin + u; $('#reqHeaders').textContent = JSON.stringify(h, null, 1); $('#reqBody').textContent = o.body || '';
+    const fl = $('#file').files[0];
+    if (fl && !['GET', 'DELETE'].includes(m)) { const fd = new FormData(); b.split('\n').forEach(l => { const k = l.indexOf('='); if (k > 0) fd.append(l.slice(0, k).trim(), l.slice(k + 1).trim()); }); fd.append('document', fl); o.body = fd; delete h['Content-Type']; }
+    else if (b.trim() && !['GET', 'DELETE'].includes(m)) o.body = b;
+    $('#reqUrl').textContent = m + ' ' + location.origin + u; $('#reqHeaders').textContent = JSON.stringify(h, null, 1); $('#reqBody').textContent = o.body instanceof FormData ? '[multipart] ' + b + ' + file ' + fl.name : (o.body || '');
     try { const r = await fetch(u, o), txt = await r.text(); let out = txt; try { out = JSON.stringify(JSON.parse(txt), null, 2); } catch {}
       $('#resStatus').textContent = r.status; $('#resTime').textContent = Math.round(performance.now() - t0) + ' ms'; $('#resBody').textContent = out;
     } catch (e) { $('#resStatus').textContent = 'ERR'; $('#resBody').textContent = String(e); }
