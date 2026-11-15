@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bank SDET Practice</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"></head>
+<body>
+<nav class="navbar navbar-dark bg-dark px-3 d-none gap-3" id="nav">
+  <span class="navbar-brand">🏦 Bank</span>
+  <a class="nav-link text-white" id="nav-dashboard" href="#/dashboard">Dashboard</a>
+  <a class="nav-link text-white" id="nav-accounts" href="#/accounts">Accounts</a>
+  <a class="nav-link text-white" id="nav-transactions" href="#/transactions">Transactions</a>
+  <a class="nav-link text-white" id="nav-explorer" href="#/explorer">API Explorer</a>
+  <a class="nav-link text-white" id="nav-swagger" href="/api-docs" target="_blank">Swagger</a>
+  <span class="ms-auto text-white-50" id="who"></span>
+  <button class="btn btn-outline-light btn-sm" id="logout">Logout</button>
+</nav>
+<div class="container py-3" id="app"></div>
+<script>
+const $ = s => document.querySelector(s), T = () => localStorage.token, pages = {};
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const api = async (m, p, b) => {
+  const r = await fetch(p, { method: m, headers: { 'Content-Type': 'application/json', ...(T() ? { Authorization: 'Bearer ' + T() } : {}) }, body: b ? JSON.stringify(b) : undefined });
+  let j = {}; try { j = await r.json(); } catch {}
+  if (r.status === 401 && T()) { localStorage.clear(); location.hash = '#/login'; }
+  return { s: r.status, j };
+};
+const msg = (j, t = 'danger') => `<div class="alert alert-${t}" data-testid="msg">${esc(j.error || j)}${(j.details || []).map(d => `<div>• ${esc(d)}</div>`).join('')}</div>`;
+const sel = (id, arr, v, all) => `<select id="${id}" class="form-select">${all ? `<option value="">${all}</option>` : ''}${arr.map(x => `<option ${x == v ? 'selected' : ''}>${x}</option>`).join('')}</select>`;
+const inp = (id, l, v, t = 'text') => `<div class="col-md-4"><label class="form-label">${l}</label><input id="${id}" type="${t}" class="form-control" value="${esc(v)}"></div>`;
+const pager = j => `<div class="d-flex gap-2 align-items-center"><button class="btn btn-sm btn-outline-secondary" id="prev" ${j.page <= 1 ? 'disabled' : ''}>Prev</button>
+<span id="pageInfo">Page ${j.page} of ${j.totalPages || 1} (${j.total} records)</span><button class="btn btn-sm btn-outline-secondary" id="next" ${j.page >= j.totalPages ? 'disabled' : ''}>Next</button></div>`;
+
+// ---------- Login / Register ----------
+pages.login = () => {
+  let reg = false;
+  $('#app').innerHTML = `<div class="col-md-4 mx-auto mt-5"><h3 id="title">Login</h3><div id="m"></div>
+  <input id="name" class="form-control mb-2 d-none" placeholder="Name"><input id="email" class="form-control mb-2" placeholder="Email">
+  <input id="password" type="password" class="form-control mb-2" placeholder="Password">
+  <button id="submit" class="btn btn-primary">Login</button> <a href="#" id="toggle">Register</a></div>`;
+  $('#toggle').onclick = e => { e.preventDefault(); reg = !reg; $('#name').classList.toggle('d-none', !reg);
+    $('#title').textContent = $('#submit').textContent = reg ? 'Register' : 'Login'; $('#toggle').textContent = reg ? 'Login' : 'Register'; };
+  $('#submit').onclick = async () => {
+    const b = { email: $('#email').value, password: $('#password').value };
+    if (reg) b.name = $('#name').value;
+    const { s, j } = await api('POST', reg ? '/auth/register' : '/auth/login', b);
+    if (s >= 400) return $('#m').innerHTML = msg(j);
+    if (reg) { $('#toggle').click(); return $('#m').innerHTML = msg('Registered successfully. Please login.', 'success'); }
+    Object.assign(localStorage, { token: j.token, userId: j.userId, email: b.email }); location.hash = '#/dashboard';
+  };
+};
+
+// ---------- Dashboard ----------
+pages.dashboard = async () => {
+  const { j } = await api('GET', '/dashboard');
+  $('#app').innerHTML = `<h3>Dashboard</h3><div class="row g-3 mb-3">
+  ${[['accCount', 'Accounts', j.accounts], ['txnCount', 'Transactions', j.transactions], ['totalBalance', 'Balance', j.totalBalance]].map(([i, l, v]) =>
+    `<div class="col"><div class="card card-body"><small>${l}</small><h2 id="${i}">${v}</h2></div></div>`).join('')}</div>
+  ${j.accounts + j.transactions === 0 ? '<div id="noRecords" class="alert alert-info">No Records Found</div>' : ''}`;
+};
+
+// ---------- Accounts ----------
+const AQ = { page: 1, limit: 5, sortBy: 'id', order: 'asc', search: '', status: '', accountType: '' };
+const SEC = { contacts: ['type:Mobile|Email|Phone', 'value', 'primary:bool'], addresses: ['type:Permanent|Current|Office', 'city', 'state'],
+  kycDocuments: ['type:PAN|AADHAAR|Passport', 'number', 'verified:bool'], nominees: ['name', 'relation', 'percentage:num'] };
+const row = (s, o = {}) => `<div class="row g-1 mb-1 r">${SEC[s].map(f => { const [k, t = ''] = f.split(':'), v = o[k]; let i;
+  if (t.includes('|')) i = `<select class="form-select" data-k="${k}">${t.split('|').map(x => `<option ${x == v ? 'selected' : ''}>${x}</option>`).join('')}</select>`;
+  else if (t == 'bool') i = `<input type="checkbox" class="form-check-input" data-k="${k}" ${v ? 'checked' : ''}> ${k}`;
+  else i = `<input type="${t == 'num' ? 'number' : 'text'}" class="form-control" placeholder="${k}" data-k="${k}" value="${esc(v)}">`;
+  return `<div class="col">${i}</div>`; }).join('')}<div class="col-1"><button type="button" class="btn btn-sm btn-outline-danger rm">×</button></div></div>`;
+const secBox = (s, items) => `<h6 class="mt-3">${s} <button type="button" class="btn btn-sm btn-outline-primary add" id="add-${s}" data-sec="${s}">+ Add</button></h6><div id="sec-${s}">${(items || []).map(o => row(s, o)).join('')}</div>`;
+const coll = s => [...document.querySelectorAll(`#sec-${s} .r`)].map(r => Object.fromEntries([...r.querySelectorAll('[data-k]')]
+  .map(i => [i.dataset.k, i.type == 'checkbox' ? i.checked : i.type == 'number' ? Number(i.value) : i.value])));
+const accForm = (a = {}) => `<form id="accForm" class="card card-body mb-3" onsubmit="return false"><h5>${a.id ? 'Edit' : 'Add'} Account</h5><div id="formMsg"></div><div class="row g-2">
+  <div class="col-md-4"><label class="form-label">Account Type</label>${sel('accountType', ['Savings', 'Current', 'Salary'], a.accountType)}</div>
+  ${inp('accountNumber', 'Account Number', a.accountNumber)}${inp('accountHolderName', 'Holder Name', a.accountHolderName)}${inp('email', 'Email', a.email)}
+  ${inp('mobileNumber', 'Mobile', a.mobileNumber)}${inp('panNumber', 'PAN', a.panNumber)}${inp('aadhaarNumber', 'Aadhaar', a.aadhaarNumber)}${inp('balance', 'Balance', a.balance ?? 0, 'number')}
+  <div class="col-md-4"><label class="form-label">Status</label>${sel('status', ['Active', 'Inactive', 'Closed'], a.status)}</div></div>
+  ${secBox('contacts', (a.customer || {}).contacts)}${secBox('addresses', (a.customer || {}).addresses)}${secBox('kycDocuments', a.kycDocuments)}${secBox('nominees', a.nominees)}
+  <div class="mt-3"><button id="saveAcc" class="btn btn-primary">Save</button> <button type="button" id="cancelAcc" class="btn btn-secondary">Cancel</button></div></form>`;
+
+pages.accounts = async () => {
+  $('#app').innerHTML = `<div class="d-flex justify-content-between mb-2"><h3>Accounts</h3><button id="addBtn" class="btn btn-success">Add Account</button></div>
+  <div class="row g-2 mb-2"><div class="col"><input id="search" class="form-control" placeholder="Search number / name / email" value="${esc(AQ.search)}"></div>
+  <div class="col-2">${sel('fStatus', ['Active', 'Inactive', 'Closed'], AQ.status, 'All Status')}</div><div class="col-2">${sel('fType', ['Savings', 'Current', 'Salary'], AQ.accountType, 'All Types')}</div>
+  <div class="col-auto"><button id="searchBtn" class="btn btn-primary">Search</button></div></div><div id="formBox"></div><div id="tbl"></div>`;
+  let cache = [];
+  const load = async () => {
+    const { j } = await api('GET', '/accounts?' + new URLSearchParams(Object.entries(AQ).filter(([, v]) => v !== ''))); cache = j.data;
+    $('#tbl').innerHTML = !j.data.length ? '<div id="noRecords" class="alert alert-info">No Records Found</div>' :
+      `<table class="table table-striped" id="accTable"><thead><tr>${[['id', 'ID'], ['accountNumber', 'Account No'], ['accountHolderName', 'Holder'], ['accountType', 'Type'], ['balance', 'Balance'], ['status', 'Status']]
+        .map(([k, l]) => `<th role="button" data-sort="${k}">${l}${AQ.sortBy == k ? (AQ.order == 'asc' ? ' ▲' : ' ▼') : ''}</th>`).join('')}<th>Actions</th></tr></thead><tbody>
+      ${j.data.map(a => `<tr data-testid="row-${esc(a.accountNumber)}"><td>${a.id}</td><td>${esc(a.accountNumber)}</td><td>${esc(a.accountHolderName)}</td><td>${a.accountType}</td><td>${a.balance}</td><td>${a.status}</td>
+      <td><a class="btn btn-sm btn-info" href="#/account/${a.id}">View</a> <button class="btn btn-sm btn-warning edit" data-id="${a.id}">Edit</button> <button class="btn btn-sm btn-danger del" data-id="${a.id}">Delete</button></td></tr>`).join('')}</tbody></table>` + pager(j);
+    if ($('#prev')) { $('#prev').onclick = () => { AQ.page--; load(); }; $('#next').onclick = () => { AQ.page++; load(); }; }
+  };
+  const openForm = a => {
+    $('#formBox').innerHTML = accForm(a); const f = $('#accForm');
+    f.onclick = e => { const t = e.target;
+      if (t.classList.contains('add')) $('#sec-' + t.dataset.sec).insertAdjacentHTML('beforeend', row(t.dataset.sec));
+      if (t.classList.contains('rm')) t.closest('.r').remove();
+      if (t.id == 'cancelAcc') $('#formBox').innerHTML = ''; };
+    $('#saveAcc').onclick = async () => {
+      const v = i => $('#' + i).value, b = { accountType: v('accountType'), accountNumber: v('accountNumber'), accountHolderName: v('accountHolderName'), email: v('email'),
+        mobileNumber: v('mobileNumber'), panNumber: v('panNumber'), aadhaarNumber: v('aadhaarNumber'), balance: Number(v('balance')) || 0, status: v('status'),
+        customer: { name: v('accountHolderName'), contacts: coll('contacts'), addresses: coll('addresses') }, kycDocuments: coll('kycDocuments'), nominees: coll('nominees') };
+      const { s, j } = await api(a ? 'PUT' : 'POST', a ? '/accounts/' + a.id : '/accounts', b);
+      if (s >= 400) return $('#formMsg').innerHTML = msg(j);
+      $('#formBox').innerHTML = msg(a ? 'Account updated' : 'Account created', 'success'); load();
+    };
+  };
+  $('#addBtn').onclick = () => openForm();
+  $('#searchBtn').onclick = () => { Object.assign(AQ, { page: 1, search: $('#search').value, status: $('#fStatus').value, accountType: $('#fType').value }); load(); };
+  $('#tbl').onclick = async e => { const t = e.target;
+    if (t.dataset.sort) { AQ.order = AQ.sortBy == t.dataset.sort && AQ.order == 'asc' ? 'desc' : 'asc'; AQ.sortBy = t.dataset.sort; load(); }
+    if (t.classList.contains('edit')) openForm(cache.find(a => a.id == t.dataset.id));
+    if (t.classList.contains('del') && confirm('Delete this account and its transactions?')) {
+      const { s, j } = await api('DELETE', '/accounts/' + t.dataset.id); $('#formBox').innerHTML = msg(s < 400 ? 'Account deleted' : j, s < 400 ? 'success' : 'danger'); load(); } };
+  load();
+};
+
+// ---------- Account details ----------
+pages.account = async id => {
+  const { s, j: a } = await api('GET', '/accounts/' + id);
+  if (s != 200) return $('#app').innerHTML = msg(a);
+  const c = a.customer, tb = (t, id, cols, rows) => `<h5 class="mt-3">${t}</h5><table class="table table-sm" id="${id}"><thead><tr>${cols.map(x => `<th>${x}</th>`).join('')}</tr></thead>
+    <tbody>${(rows || []).map(r => `<tr>${cols.map(x => `<td>${esc(r[x])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  $('#app').innerHTML = `<a href="#/accounts">&larr; Back</a><h3 class="mt-2">Account ${esc(a.accountNumber)}</h3><div class="card card-body"><div class="row">
+  ${[['type', 'Type', a.accountType], ['holder', 'Holder', c.name], ['email', 'Email', a.email], ['mobile', 'Mobile', a.mobileNumber], ['pan', 'PAN', a.panNumber],
+    ['aadhaar', 'Aadhaar', a.aadhaarNumber], ['balance', 'Balance', a.balance], ['status', 'Status', a.status]].map(([i, l, v]) => `<div class="col-md-3"><b>${l}</b><div id="d-${i}">${esc(v)}</div></div>`).join('')}</div></div>
+  ${tb('Contacts', 'tblContacts', ['type', 'value', 'primary'], c.contacts)}${tb('Addresses', 'tblAddresses', ['type', 'city', 'state'], c.addresses)}
+  ${tb('KYC Documents', 'tblKyc', ['type', 'number', 'verified'], a.kycDocuments)}${tb('Nominees', 'tblNominees', ['name', 'relation', 'percentage'], a.nominees)}`;
+};
+
+// ---------- Transactions ----------
+const TQ = { page: 1, limit: 10, sortBy: 'id', order: 'desc' };
+pages.transactions = async () => {
+  const acc = (await api('GET', '/accounts?limit=100')).j.data || [];
+  $('#app').innerHTML = `<h3>Transactions</h3><div id="tm"></div><div class="card card-body mb-3"><div class="row g-2">
+  <div class="col-md-3"><label class="form-label">Account</label><select id="tAccount" class="form-select">${acc.map(a => `<option value="${a.id}">${a.id} - ${esc(a.accountNumber)}</option>`).join('')}</select></div>
+  <div class="col-md-2"><label class="form-label">Type</label>${sel('tType', ['DEPOSIT', 'WITHDRAWAL'])}</div>
+  ${inp('tAmount', 'Amount', '', 'number').replace('col-md-4', 'col-md-2')}${inp('tDesc', 'Description', '').replace('col-md-4', 'col-md-3')}${inp('tKey', 'Idempotency-Key (optional)', '').replace('col-md-4', 'col-md-2')}
+  </div><div class="mt-2"><button id="createTxn" class="btn btn-primary">Create Transaction</button></div></div><div id="ttbl"></div>`;
+  const load = async () => {
+    const { j } = await api('GET', '/transactions?' + new URLSearchParams(TQ));
+    $('#ttbl').innerHTML = !j.data.length ? '<div id="noRecords" class="alert alert-info">No Records Found</div>' :
+      `<table class="table table-striped" id="txnTable"><thead><tr><th>Transaction ID</th><th>Account</th><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody>
+      ${j.data.map(t => `<tr data-testid="txn-${t.id}"><td>${t.id}</td><td>${t.accountId}</td><td>${t.transactionType}</td><td>${t.amount}</td><td>${t.status}</td><td>${new Date(t.createdAt).toLocaleString()}</td></tr>`).join('')}</tbody></table>` + pager(j);
+    if ($('#prev')) { $('#prev').onclick = () => { TQ.page--; load(); }; $('#next').onclick = () => { TQ.page++; load(); }; }
+  };
+  $('#createTxn').onclick = async () => {
+    const key = $('#tKey').value, r = await fetch('/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + T(), ...(key ? { 'Idempotency-Key': key } : {}) },
+      body: JSON.stringify({ accountId: +$('#tAccount').value, transactionType: $('#tType').value, amount: Number($('#tAmount').value), description: $('#tDesc').value }) });
+    const j = await r.json();
+    $('#tm').innerHTML = msg(r.ok ? (r.status == 200 ? `Replay: existing transaction #${j.id} returned` : `Transaction #${j.id} created`) : j, r.ok ? 'success' : 'danger'); load();
+  };
+  load();
+};
+
+// ---------- API Explorer ----------
+pages.explorer = () => {
+  $('#app').innerHTML = `<h3>API Explorer</h3><div class="row g-2 mb-2"><div class="col-2">${sel('method', ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])}</div>
+  <div class="col"><input id="url" class="form-control" value="/accounts" placeholder="/path?query"></div><div class="col-auto"><button id="run" class="btn btn-primary">Execute</button></div></div>
+  <label class="form-label">Headers (JSON) <button id="addJwt" class="btn btn-sm btn-outline-secondary">Add JWT Token</button></label>
+  <textarea id="hdrs" class="form-control mb-2" rows="3">{"Content-Type":"application/json"}</textarea>
+  <label class="form-label">Body (raw)</label><textarea id="body" class="form-control mb-3" rows="8"></textarea>
+  <div class="row"><div class="col-md-6"><b>Request URL</b><pre id="reqUrl" class="border p-2"></pre><b>Request Headers</b><pre id="reqHeaders" class="border p-2"></pre><b>Request Body</b><pre id="reqBody" class="border p-2"></pre></div>
+  <div class="col-md-6"><b>Status Code</b> <span id="resStatus" class="badge bg-secondary"></span> <b>Time</b> <span id="resTime"></span><br><b>Response Body</b><pre id="resBody" class="border p-2" style="max-height:420px;overflow:auto"></pre></div></div>`;
+  $('#addJwt').onclick = () => { let h = {}; try { h = JSON.parse($('#hdrs').value || '{}'); } catch {} h.Authorization = 'Bearer ' + (T() || ''); $('#hdrs').value = JSON.stringify(h, null, 1); };
+  $('#run').onclick = async () => {
+    let h; try { h = JSON.parse($('#hdrs').value || '{}'); } catch { return alert('Headers must be valid JSON'); }
+    const m = $('#method').value, u = $('#url').value, b = $('#body').value, o = { method: m, headers: h }, t0 = performance.now();
+    if (b.trim() && !['GET', 'DELETE'].includes(m)) o.body = b;
+    $('#reqUrl').textContent = m + ' ' + location.origin + u; $('#reqHeaders').textContent = JSON.stringify(h, null, 1); $('#reqBody').textContent = o.body || '';
+    try { const r = await fetch(u, o), txt = await r.text(); let out = txt; try { out = JSON.stringify(JSON.parse(txt), null, 2); } catch {}
+      $('#resStatus').textContent = r.status; $('#resTime').textContent = Math.round(performance.now() - t0) + ' ms'; $('#resBody').textContent = out;
+    } catch (e) { $('#resStatus').textContent = 'ERR'; $('#resBody').textContent = String(e); }
+  };
+};
+
+// ---------- Router ----------
+$('#logout').onclick = async () => { await api('POST', '/auth/logout'); localStorage.clear(); location.hash = '#/login'; };
+const route = () => {
+  const [p, id] = (location.hash.slice(2) || 'dashboard').split('/');
+  $('#nav').classList.toggle('d-none', !T()); $('#who').textContent = localStorage.email || '';
+  if (!T() && p != 'login') return location.hash = '#/login';
+  (pages[p] || pages.dashboard)(id);
+};
+addEventListener('hashchange', route); route();
+</script></body></html>
